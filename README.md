@@ -5,10 +5,11 @@ challenges. If you cross the line early, you lose it all. See [GAME_DESIGN.md](G
 
 ## What's in here
 ```
-src/shared/   Config.luau (all numbers to tweak), Remotes.luau
+src/shared/   Config.luau (all numbers, prices and sound IDs to tweak), Remotes.luau, Format.luau
 src/server/   Main, PlayerData (saving), MapBuilder (auto map), Track, Activities,
-              RedLine, Challenges
-src/client/   Main (HUD + popups), Minigames (push-ups / hang / pull-up), UI helpers
+              RedLine, Challenges, Shop, Leaderboard
+src/client/   Main (HUD + popups), Minigames (push-ups / hang / pull-up / plank),
+              ShopUI, Sounds, UI helpers
 blender/      make_assets.py + export/*.fbx (dumbbell, money bag, treadmill, bench, hoop)
 ```
 
@@ -29,9 +30,13 @@ blender/      make_assets.py + export/*.fbx (dumbbell, money bag, treadmill, ben
 2. Run `.\rojo.exe serve` in this folder.
 3. In Studio, click the **Rojo** plugin and choose **Connect**. Code changes now show up instantly.
 
-### Turn on saving
-Go to **Game Settings → Security** and enable **Enable Studio Access to API Services**.
-Without this, Bank and Wins won't save while you test in Studio. The game still works.
+### Turn on saving and the leaderboard
+1. Publish the place once (**File → Publish to Roblox**). DataStores only work in a published place.
+2. Go to **Game Settings → Security** and enable **Enable Studio Access to API Services**.
+
+Without this, Bank, Wins and shop items won't save while you test in Studio, and the
+leaderboard sign says "offline". The game still works. A small "Saving is off" message
+tells you when data couldn't load. The game then won't save that visit, so it can't wipe your real save.
 
 ## How to play
 - **Treadmill**: walk forward on the belt. Gives Fitness and Stamina.
@@ -40,8 +45,10 @@ Without this, Bank and Wins won't save while you test in Studio. The game still 
 - **Running track**: run a full lap through the start line. Gives Fitness and Stamina.
 - **Healthy meal**: restores Energy. **Junk food** restores more Energy but lowers Fitness.
 - **Bed**: sleep to restore all Energy (60-second cooldown).
-- At **15 / 30 / 45 / 60 / 75% Fitness** there's a check-in and a challenge unlocks. Press **START CHALLENGE**.
+- At **15 / 30 / 45 / 60 / 75 / 90% Fitness** there's a check-in and a challenge unlocks. Press **START CHALLENGE**.
 - At **100%** the line turns green. Walk across it to bank the whole prize pool.
+- **SHOP** (button under your stats): spend Bank money on shirt colors and trails. You keep them forever.
+- The **TOP BANKS** sign near the spawn shows the richest players across all servers (updates every 60s).
 
 ## Using your Blender models
 The FBX files are already exported to `blender/export/`. To regenerate or change them:
@@ -64,13 +71,24 @@ To make a model *work* in the game, add a tag to one of its parts:
 | `RedLine` | Invisible trigger (put it on tall, transparent, CanCollide-off parts) |
 | `RedLineVisual` | Glowing line that turns green when you reach the goal |
 | `TrackCP` | Track checkpoints. Also add a number attribute `Order` = 1, 2, 3... in order around the track |
+| `Leaderboard` | A flat part that shows the global leaderboard on its **Front** face |
 
 **Building your own map:** make a Model named **Compound** in Workspace. The auto-builder then
 stays off, and only your tagged parts are used.
 
 ## Tweak the game
 Every number lives in `src/shared/Config.luau`: prize amounts, energy costs, how fast Fitness
-goes up, challenge difficulty, map size and more.
+goes up, challenge difficulty, map size, shop items and prices, and more.
+
+### Sounds
+`Config.Sounds` has one entry per sound effect (check-in, challenge win, challenge fail,
+coin, red line warning). The defaults are basic sounds built into Roblox, so they always play.
+To use better ones, open the **Creator Store → Audio** in Studio's Toolbox, pick a free sound,
+copy the number from its link and set `Id = "rbxassetid://THAT_NUMBER"`. Press Play to check it.
+
+### Shop shirts
+Shirt colors tint the player's own shirt (or color their torso if they have none). For one
+shared look, put a plain white shirt template ID in `Config.Shop.ShirtTemplate`.
 
 ## Publish
 File → **Publish to Roblox**, then set the game to Public in Game Settings.

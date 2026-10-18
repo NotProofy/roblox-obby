@@ -28,7 +28,7 @@ Framed around **fitness and strength**, not body weight, so it's positive and sa
 1. **Train**: treadmill, weight bench, basketball hoop, running track. Each costs **Energy** and raises stats.
 2. **Eat**: healthy food restores Energy. Junk food restores more Energy but *lowers* Fitness (temptation).
 3. **Sleep**: the bed skips to the next day and refills Energy.
-4. **Check-in** every 5 days: a dramatic Fitness reveal, a new shirt tier, and a new **micro-challenge** unlocks.
+4. **Check-in** at every 15% Fitness (15, 30, 45, 60, 75, 90): a dramatic reveal, a new shirt tier, and a new **micro-challenge** unlocks.
 5. **Micro-challenges** add cash to the **Prize Pool**.
 6. Reach **100% Fitness** → walk out the gate → Prize Pool goes to your **Bank** (permanent, leaderboard). Start a new run, harder.
 
@@ -46,6 +46,7 @@ Framed around **fitness and strength**, not body weight, so it's positive and sa
 | 3 | **Beat the Mile** | Run the track checkpoints before the timer runs out. Stamina = speed. | $25,000 |
 | 4 | **Crane Hang** | On a platform high up, mash SPACE to keep your grip meter up. Strength slows the drain. | $1,000 per second |
 | 5 | **The Pull-Up** | One hard timing press with a tiny window (Strength widens it). | $10,000 |
+| 6 | **Plank Hold** | On the mat: HOLD to lift the marker, let go to drop it. Keep it in the drifting green zone; your Form drains while you're outside it. Strength widens the zone. | $1,500 per second (max 120s) |
 
 ### The red line
 - A glowing ring around the compound with a gate.
@@ -53,10 +54,12 @@ Framed around **fitness and strength**, not body weight, so it's positive and sa
 - Once Fitness hits 100%, the gate turns green and crossing it **wins**.
 
 ### Progress rewards
-- Shirt tier changes color at every check-in (3XL → 2XL → XL → L → M feel, shown as colors and names).
-- Leaderboard: **Bank** (lifetime winnings) and **Wins**.
+- Shirt size goes down at every check-in (3XL → 2XL → XL → L → M → S → XS).
+- Leaderboard: **Bank** and **Wins** in the player list, plus a global **TOP BANKS** sign in the compound (OrderedDataStore, refreshed every 60s).
+- **Shop**: spend Bank money on cosmetic shirt colors and character trails. Bought items are saved. Spending lowers your Bank, so it's a choice between showing off and climbing the leaderboard.
+- **Sound effects** for check-ins, challenge wins and fails, coins and the red line warning (IDs in Config).
 
 ## 3. What's built in this project
-- Rojo project in `src/` (Luau): data saving, stats, day/night clock, activities, red line, check-ins, all 5 challenges, HUD, popups.
+- Rojo project in `src/` (Luau): data saving, stats, day/night clock, activities, red line, check-ins, all 6 challenges, HUD, popups, shop, global leaderboard, sound effects.
 - **Auto map builder**: if your place has no map, the game builds a playable compound on start. Delete or replace it later with your own Blender/Studio models, tagged the same way.
 - `blender/make_assets.py`: generates low-poly props (dumbbell, money bag, treadmill, bench, hoop) as FBX for Roblox's 3D Importer.

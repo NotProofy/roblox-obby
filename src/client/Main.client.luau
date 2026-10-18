@@ -1,4 +1,4 @@
--- The HUD, popups, red-line warning and challenge screens.
+-- The HUD, popups, red-line warning, shop button and challenge screens.
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -6,19 +6,29 @@ local TweenService = game:GetService("TweenService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
+local Format = require(ReplicatedStorage.Shared.Format)
 local UI = require(script.Parent.UI)
 local Minigames = require(script.Parent.Minigames)
+local Sounds = require(script.Parent.Sounds)
+local ShopUI = require(script.Parent.ShopUI)
 
 local player = Players.LocalPlayer
 local gui = UI.new("ScreenGui", { Name = "RedLineHUD", ResetOnSpawn = false, IgnoreGuiInset = false, Parent = player:WaitForChild("PlayerGui") })
+local money = Format.money
 
-local function money(n)
-	local s = tostring(math.floor(n or 0))
-	repeat
-		local count
-		s, count = s:gsub("^(%d+)(%d%d%d)", "%1,%2")
-	until count == 0
-	return "$" .. s
+-- Shrink the whole HUD on small screens (phones) so it doesn't cover the controls
+local uiScale = UI.new("UIScale", { Parent = gui })
+local function rescale()
+	local camera = workspace.CurrentCamera
+	if camera then
+		local size = camera.ViewportSize
+		uiScale.Scale = math.clamp(math.min(size.X / 1100, size.Y / 700), 0.55, 1)
+	end
+end
+rescale()
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(rescale)
+if workspace.CurrentCamera then
+	workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(rescale)
 end
 
 ---------------------------------------------------------------------------
@@ -46,6 +56,7 @@ local function colorRedLine(reached)
 end
 
 local lastPrize = nil
+local lastBank = nil
 local function refresh()
 	local fitness = player:GetAttribute("Fitness") or 0
 	dayLabel.Text = "DAY " .. (player:GetAttribute("Day") or 1)
@@ -57,22 +68,33 @@ local function refresh()
 	local prize = player:GetAttribute("Prize") or 0
 	prizeLabel.Text = money(prize)
 	bankLabel.Text = "Bank: " .. money(player:GetAttribute("Bank"))
+	local bank = player:GetAttribute("Bank") or 0
 	if lastPrize and prize > lastPrize then
 		prizeLabel.TextColor3 = UI.Colors.Green
 		task.delay(1.5, function()
 			prizeLabel.TextColor3 = UI.Colors.Gold
 		end)
 	end
-	lastPrize = prize
+	if (lastPrize and prize > lastPrize) or (lastBank and bank > lastBank) then
+		Sounds.play("Coin")
+	end
+	-- Stay nil until the server has sent real values, so joining doesn't count as "money gained"
+	lastPrize = player:GetAttribute("Prize")
+	lastBank = player:GetAttribute("Bank")
 	colorRedLine(fitness >= Config.GoalFitness)
 end
 player.AttributeChanged:Connect(refresh)
 refresh()
+-- Parts can stream in later, so color new red line parts too
+CollectionService:GetInstanceAddedSignal("RedLineVisual"):Connect(function()
+	colorRedLine((player:GetAttribute("Fitness") or 0) >= Config.GoalFitness)
+end)
 
 ---------------------------------------------------------------------------
--- Notifications: small toasts (bottom right) and big banners (center)
+-- Notifications: small toasts (right side) and big banners (center)
 ---------------------------------------------------------------------------
-local toasts = UI.new("Frame", { Parent = gui, BackgroundTransparency = 1, AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -12, 1, -12), Size = UDim2.fromOffset(280, 300) }, {
+-- Toasts sit above the bottom-right corner so they never cover the phone jump button
+local toasts = UI.new("Frame", { Parent = gui, BackgroundTransparency = 1, AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -12, 0.7, 0), Size = UDim2.fromOffset(280, 300) }, {
 	UI.new("UIListLayout", { VerticalAlignment = Enum.VerticalAlignment.Bottom, Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }),
 })
 local toastOrder = 0
@@ -107,7 +129,8 @@ local function bigBanner(title, body)
 	end)
 end
 
-Remotes.Notify.OnClientEvent:Connect(function(kind, title, body)
+Remotes.Notify.OnClientEvent:Connect(function(kind, title, body, soundName)
+	Sounds.play(soundName)
 	if kind == "big" then
 		bigBanner(title, body)
 	else
@@ -127,6 +150,7 @@ local leaveButton = UI.button({ Parent = confirm, Position = UDim2.new(0.5, 8, 1
 Remotes.ConfirmLeave.OnClientEvent:Connect(function(prize)
 	confirmBody.Text = "If you leave now you lose the " .. money(prize) .. " prize pool and start over."
 	confirm.Visible = true
+	Sounds.play("RedLineWarning")
 end)
 stayButton.Activated:Connect(function()
 	confirm.Visible = false
@@ -135,6 +159,15 @@ end)
 leaveButton.Activated:Connect(function()
 	confirm.Visible = false
 	Remotes.LeaveAnswer:FireServer(true)
+end)
+
+---------------------------------------------------------------------------
+-- Shop button (under the stats panel) and shop window
+---------------------------------------------------------------------------
+local toggleShop = ShopUI.create(gui)
+local shopButton = UI.button({ Parent = gui, Position = UDim2.new(0, 12, 0.55, 108), Size = UDim2.fromOffset(130, 44), Text = "SHOP", BackgroundColor3 = UI.Colors.Gold, TextColor3 = Color3.fromRGB(30, 25, 5) })
+shopButton.Activated:Connect(function()
+	toggleShop()
 end)
 
 ---------------------------------------------------------------------------
@@ -148,6 +181,14 @@ local startButton = UI.button({ Parent = challengePanel, AnchorPoint = Vector2.n
 local function refreshChallenge()
 	local index = player:GetAttribute("NextChallenge") or 0
 	local busy = player:GetAttribute("InChallenge") ~= nil
+	if busy then
+		toggleShop(false) -- no shopping in the middle of a challenge
+	end
+	if busy and confirm.Visible then
+		-- A challenge started while the red line question was open: answer "stay"
+		confirm.Visible = false
+		Remotes.LeaveAnswer:FireServer(false)
+	end
 	local challenge = Config.Challenges[index]
 	challengePanel.Visible = challenge ~= nil and not busy
 	if challenge then
@@ -178,7 +219,8 @@ local function carryChooser(params)
 	local amount = UI.text({ Parent = frame, Position = UDim2.fromOffset(80, 92), Size = UDim2.new(1, -160, 0, 44), Text = "" })
 	local minus = UI.button({ Parent = frame, Position = UDim2.fromOffset(20, 92), Size = UDim2.fromOffset(50, 44), Text = "-", BackgroundColor3 = UI.Colors.Blue })
 	local plus = UI.button({ Parent = frame, Position = UDim2.new(1, -70, 0, 92), Size = UDim2.fromOffset(50, 44), Text = "+", BackgroundColor3 = UI.Colors.Blue })
-	local go = UI.button({ Parent = frame, AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 152), Size = UDim2.fromOffset(200, 50), Text = "PICK UP & GO", BackgroundColor3 = UI.Colors.Green })
+	local go = UI.button({ Parent = frame, Position = UDim2.new(0.5, -110, 0, 152), Size = UDim2.fromOffset(200, 50), Text = "PICK UP & GO", BackgroundColor3 = UI.Colors.Green })
+	local cancel = UI.button({ Parent = frame, Position = UDim2.new(0.5, 100, 0, 152), Size = UDim2.fromOffset(100, 50), Text = "CANCEL", BackgroundColor3 = UI.Colors.Red })
 	local function show()
 		amount.Text = bags .. " bag" .. (if bags == 1 then "" else "s") .. " = " .. money(bags * Config.CashCarry.PerBag)
 	end
@@ -194,6 +236,10 @@ local function carryChooser(params)
 	go.Activated:Connect(function()
 		frame:Destroy()
 		Remotes.CarryChoice:FireServer(bags)
+	end)
+	cancel.Activated:Connect(function()
+		frame:Destroy()
+		Remotes.CarryChoice:FireServer(0) -- 0 bags = cancel, the challenge stays unlocked
 	end)
 	return frame
 end
@@ -226,7 +272,7 @@ Remotes.ChallengeBegin.OnClientEvent:Connect(function(id, params)
 		end
 		return
 	end
-	if id == "PushUps" or id == "Hang" or id == "PullUp" then
+	if id == "PushUps" or id == "Hang" or id == "PullUp" or id == "Plank" then
 		Minigames[id](gui, params, function(result)
 			Remotes.ChallengeResult:FireServer(result)
 		end)

@@ -1,7 +1,7 @@
 -- Builds a simple playable compound out of plain parts if the place doesn't have one.
 -- To use your own map: build a Model called "Compound" in Workspace and tag your parts
 -- the same way (Treadmill, Bench, Hoop, HealthyFood, JunkFood, Bed, RedLine, TrackCP,
--- PushUpSpot, CraneSpot). This builder then does nothing.
+-- PushUpSpot, CraneSpot, Leaderboard). This builder then does nothing.
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -147,6 +147,12 @@ function MapBuilder.Build()
 	part({ Name = "HangBar", Shape = Enum.PartType.Cylinder, Size = Vector3.new(6, 0.5, 0.5), Position = Vector3.new(cx, h + 5, cz), Color = Color3.fromRGB(200, 200, 200), Material = Enum.Material.Metal })
 	part({ Name = "CraneSpot", Size = Vector3.new(10, 1, 10), Position = Vector3.new(cx, h - 0.5, cz), Color = Color3.fromRGB(60, 60, 60), Material = Enum.Material.DiamondPlate, Tag = "CraneSpot", Transparency = 0.2 })
 	label(compound:FindFirstChild("CraneTower"), "THE CRANE")
+
+	-- Global leaderboard sign near the spawn, facing it
+	local boardPos = Vector3.new(16, 7, 30)
+	local facing = Vector3.new(0, 7, 20)
+	part({ Name = "Leaderboard", Size = Vector3.new(10, 12, 0.5), CFrame = CFrame.lookAt(boardPos, facing), Color = Color3.fromRGB(20, 22, 30), Tag = "Leaderboard" })
+	part({ Name = "LeaderboardPost", Size = Vector3.new(0.6, 1, 0.6), Position = Vector3.new(16, 0.5, 30), Color = Color3.fromRGB(60, 60, 70) })
 end
 
 return MapBuilder

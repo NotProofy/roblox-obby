@@ -11,7 +11,7 @@ local PlayerData = require(script.Parent.PlayerData)
 
 local RedLine = {}
 
-local lastTouch = {} -- [player] = time
+local lastTouch = {} -- [player] = time (stops one step firing dozens of touches)
 local waitingForAnswer = {} -- [player] = true
 
 local function sendToSpawn(player)
@@ -37,7 +37,9 @@ local function onTouched(hit)
 	if not player or player:GetAttribute("InChallenge") then
 		return
 	end
-	if lastTouch[player] and os.clock() - lastTouch[player] < 2 then
+	-- A short wait between touches. It must be short, or a player could walk
+	-- straight through the line while it is ignoring them.
+	if lastTouch[player] and os.clock() - lastTouch[player] < 0.3 then
 		return
 	end
 	lastTouch[player] = os.clock()
@@ -45,13 +47,19 @@ local function onTouched(hit)
 	if not profile then
 		return
 	end
+	local humanoid = hit.Parent:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then
+		return
+	end
 
 	if profile.Run.Fitness >= Config.GoalFitness then
+		waitingForAnswer[player] = nil
 		PlayerData.EndRun(player, true)
 		sendToSpawn(player)
 		return
 	end
 
+	-- Always push them back in. Only ask the question once until they answer.
 	pushInside(player)
 	if not waitingForAnswer[player] then
 		waitingForAnswer[player] = true
@@ -73,10 +81,14 @@ function RedLine.Start()
 			return
 		end
 		waitingForAnswer[player] = nil
-		if wantsToLeave == true then
-			PlayerData.EndRun(player, false)
-			sendToSpawn(player)
+		local profile = PlayerData.Get(player)
+		-- Can't leave in the middle of a challenge (the run would reset under it)
+		if wantsToLeave ~= true or not profile or player:GetAttribute("InChallenge") then
+			return
 		end
+		-- If they reached the goal while the question was open, that's a win, not a loss
+		PlayerData.EndRun(player, profile.Run.Fitness >= Config.GoalFitness)
+		sendToSpawn(player)
 	end)
 
 	Players.PlayerRemoving:Connect(function(player)

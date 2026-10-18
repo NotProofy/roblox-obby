@@ -6,11 +6,19 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
+local Format = require(ReplicatedStorage.Shared.Format)
 
 local store = DataStoreService:GetDataStore(Config.DataStoreName)
 
 local PlayerData = {}
-local profiles = {} -- [player] = data table
+local profiles = {} -- [player] = data table (this is what gets saved)
+local session = {} -- [player] = { LastTiredNotice = time } (never saved)
+local loadFailed = {} -- [player] = true if loading failed, so we never overwrite their save
+local pendingSaves = 0 -- how many saves are running right now (used when the server shuts down)
+local loadedEvent = Instance.new("BindableEvent")
+
+-- Fires with (player) once their data has loaded. Other systems use it to set things up.
+PlayerData.Loaded = loadedEvent.Event
 
 local function newRun()
 	return {
@@ -26,7 +34,14 @@ local function newRun()
 end
 
 local function newProfile()
-	return { Bank = 0, Wins = 0, BestDays = 0, Run = newRun() }
+	return {
+		Bank = 0,
+		Wins = 0,
+		BestDays = 0,
+		Run = newRun(),
+		Owned = {}, -- [shop item Id] = true
+		Equipped = { Shirts = "", Trails = "" }, -- shop item Id per category ("" = none)
+	}
 end
 
 local function withRetries(fn)
@@ -36,9 +51,35 @@ local function withRetries(fn)
 			return true, result
 		end
 		warn("DataStore attempt " .. attempt .. " failed: " .. tostring(result))
-		task.wait(attempt * 2)
+		if attempt < 3 then
+			task.wait(attempt * 2)
+		end
 	end
 	return false, nil
+end
+
+-- Copy values from a saved table into a fresh default table.
+-- Only keys the default has, with the same type, are copied. This means old saves
+-- get any new fields automatically and a broken value can't crash the game.
+local function merge(into, saved)
+	-- Owned starts empty, so copy its entries one by one
+	if type(saved.Owned) == "table" and type(into.Owned) == "table" then
+		for id, owned in saved.Owned do
+			if type(id) == "string" and owned == true then
+				into.Owned[id] = true
+			end
+		end
+	end
+	for key, default in into do
+		local value = saved[key]
+		if value ~= nil and type(value) == type(default) then
+			if type(default) == "table" then
+				merge(default, value)
+			else
+				into[key] = value
+			end
+		end
+	end
 end
 
 -- Copy the data onto attributes + leaderstats so clients can see it
@@ -59,6 +100,16 @@ function PlayerData.Sync(player)
 	local ready = run.ChallengesDone < run.CheckIns and run.ChallengesDone < #Config.Challenges
 	player:SetAttribute("NextChallenge", if ready then run.ChallengesDone + 1 else 0)
 
+	-- Shop: attributes can't hold tables, so owned items are a comma list
+	local owned = {}
+	for id in p.Owned do
+		table.insert(owned, id)
+	end
+	table.sort(owned)
+	player:SetAttribute("Owned", table.concat(owned, ","))
+	player:SetAttribute("EquippedShirts", p.Equipped.Shirts)
+	player:SetAttribute("EquippedTrails", p.Equipped.Trails)
+
 	local stats = player:FindFirstChild("leaderstats")
 	if stats then
 		stats.Bank.Value = p.Bank
@@ -70,8 +121,20 @@ function PlayerData.Get(player)
 	return profiles[player]
 end
 
-function PlayerData.Notify(player, kind, title, body)
-	Remotes.Notify:FireClient(player, kind, title, body or "")
+-- soundName is optional: a key of Config.Sounds to play with the message
+function PlayerData.Notify(player, kind, title, body, soundName)
+	Remotes.Notify:FireClient(player, kind, title, body or "", soundName)
+end
+
+-- Spend Bank money (shop). Returns true if they had enough.
+function PlayerData.SpendBank(player, amount)
+	local p = profiles[player]
+	if not p or amount < 0 or p.Bank < amount then
+		return false
+	end
+	p.Bank -= amount
+	PlayerData.Sync(player)
+	return true
 end
 
 local function checkIns(player, run)
@@ -79,12 +142,11 @@ local function checkIns(player, run)
 		run.CheckIns += 1
 		local challenge = Config.Challenges[run.CheckIns]
 		local tier = Config.ShirtTiers[math.min(run.CheckIns + 1, #Config.ShirtTiers)]
-		PlayerData.Notify(
-			player,
-			"big",
-			"CHECK-IN: " .. math.floor(run.Fitness) .. "% FIT!",
-			"New shirt size: " .. tier .. "\nChallenge unlocked: " .. challenge.Name
-		)
+		local body = "New shirt size: " .. tier
+		if challenge then
+			body ..= "\nChallenge unlocked: " .. challenge.Name
+		end
+		PlayerData.Notify(player, "big", "CHECK-IN: " .. math.floor(run.Fitness) .. "% FIT!", body, "CheckIn")
 	end
 end
 
@@ -106,7 +168,7 @@ function PlayerData.Add(player, stat, amount)
 				player,
 				"big",
 				"GOAL REACHED!",
-				"The red line is green. Walk out to claim $" .. run.Prize .. "!"
+				"The red line is green. Walk out to claim " .. Format.money(run.Prize) .. "!"
 			)
 		end
 	elseif stat == "Strength" or stat == "Stamina" then
@@ -120,13 +182,14 @@ end
 -- Spend energy. Returns false (and tells the player) if they don't have enough.
 function PlayerData.Spend(player, energy)
 	local p = profiles[player]
-	if not p then
+	local s = session[player]
+	if not p or not s then
 		return false
 	end
 	if p.Run.Energy < energy then
 		-- Don't spam the message every tick
-		if os.clock() - (p.LastTiredNotice or 0) > 5 then
-			p.LastTiredNotice = os.clock()
+		if os.clock() - (s.LastTiredNotice or 0) > 5 then
+			s.LastTiredNotice = os.clock()
 			PlayerData.Notify(player, "small", "Too tired!", "Eat something or sleep in the bed.")
 		end
 		return false
@@ -148,9 +211,9 @@ function PlayerData.EndRun(player, won)
 		if p.BestDays == 0 or run.Day < p.BestDays then
 			p.BestDays = run.Day
 		end
-		PlayerData.Notify(player, "big", "YOU WON $" .. run.Prize .. "!", "Finished in " .. run.Day .. " days. A new run begins!")
+		PlayerData.Notify(player, "big", "YOU WON " .. Format.money(run.Prize) .. "!", "Finished in " .. run.Day .. " days. A new run begins!", "ChallengeWin")
 	else
-		PlayerData.Notify(player, "big", "YOU CROSSED THE LINE", "The $" .. run.Prize .. " prize pool is gone. Try again!")
+		PlayerData.Notify(player, "big", "YOU CROSSED THE LINE", "The " .. Format.money(run.Prize) .. " prize pool is gone. Try again!", "ChallengeFail")
 	end
 	p.Run = newRun()
 	PlayerData.Sync(player)
@@ -158,12 +221,14 @@ end
 
 local function save(player)
 	local p = profiles[player]
-	if not p then
+	if not p or loadFailed[player] then
 		return
 	end
+	pendingSaves += 1
 	withRetries(function()
 		store:SetAsync("player_" .. player.UserId, p)
 	end)
+	pendingSaves -= 1
 end
 
 local function onPlayerAdded(player)
@@ -182,21 +247,23 @@ local function onPlayerAdded(player)
 	end)
 	local profile = newProfile()
 	if ok and type(saved) == "table" then
-		for key, value in saved do
-			if key == "Run" and type(value) == "table" then
-				for runKey, runValue in value do
-					profile.Run[runKey] = runValue
-				end
-			else
-				profile[key] = value
-			end
-		end
+		merge(profile, saved)
 	end
 	if not player.Parent then
 		return -- left while loading
 	end
+	if not ok then
+		-- Loading failed (DataStores down, or API access off in Studio). Let them play,
+		-- but never save, or we'd overwrite their real data with this empty profile.
+		loadFailed[player] = true
+		PlayerData.Notify(player, "small", "Saving is off", "Your data couldn't load, so this visit won't save.")
+	end
+	session[player] = {}
 	profiles[player] = profile
+	-- The leaderboard only trusts Bank values from profiles that loaded properly
+	player:SetAttribute("DataLoaded", ok)
 	PlayerData.Sync(player)
+	loadedEvent:Fire(player)
 end
 
 function PlayerData.Start()
@@ -207,12 +274,18 @@ function PlayerData.Start()
 	Players.PlayerRemoving:Connect(function(player)
 		save(player)
 		profiles[player] = nil
+		session[player] = nil
+		loadFailed[player] = nil
 	end)
 	game:BindToClose(function()
 		for _, player in Players:GetPlayers() do
 			task.spawn(save, player)
 		end
-		task.wait(3)
+		-- Wait until every save has finished (Roblox allows up to 30 seconds here)
+		local started = os.clock()
+		repeat
+			task.wait(0.5)
+		until pendingSaves <= 0 or os.clock() - started > 25
 	end)
 	-- Autosave every 2 minutes
 	task.spawn(function()
