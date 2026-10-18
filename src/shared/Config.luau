@@ -25,6 +25,7 @@ Config.HealthyFood = { Energy = 25, Cooldown = 20 }
 Config.JunkFood = { Energy = 45, FitnessLoss = 2, Cooldown = 10 }
 
 Config.MaxStat = 100 -- cap for Strength and Stamina
+Config.WalkSpeed = 16 -- normal walking speed (challenges change it and put it back to this)
 
 -- Challenges, played in this order
 Config.Challenges = {
@@ -40,6 +41,10 @@ Config.CashCarry = { PerBag = 10000, MaxBags = 10, SpeedLossPerBag = 0.8, MinSpe
 Config.Mile = { Reward = 25000, Laps = 3, TimeLimit = 60, BaseSpeed = 16, SpeedPerStamina = 0.08 }
 Config.Hang = { PerSecond = 1000, MaxSeconds = 240 }
 Config.PullUp = { Reward = 10000 }
+
+-- Safety nets so nobody gets stuck in a challenge
+Config.ChallengeTimeout = 300 -- seconds before a timing challenge is cancelled if the client never answers
+Config.CarryChoiceTimeout = 45 -- seconds to pick a number of bags before Cash Carry is cancelled
 
 -- Map layout (used by the auto map builder and the track)
 Config.Map = {

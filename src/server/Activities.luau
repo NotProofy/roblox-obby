@@ -29,6 +29,15 @@ end
 -- Adds a ProximityPrompt to every part with `tag`, now and in the future
 local function promptFor(tag, actionText, holdSeconds, onTriggered)
 	local function setup(part)
+		-- Prompts only show on a part, an attachment or a model with a PrimaryPart.
+		-- If a whole imported model was tagged, use its first part instead.
+		if part:IsA("Model") and not part.PrimaryPart then
+			part = part:FindFirstChildWhichIsA("BasePart", true)
+		end
+		if not part or not (part:IsA("BasePart") or part:IsA("Attachment") or part:IsA("Model")) then
+			warn("Tag '" .. tag .. "' must be on a part")
+			return
+		end
 		local prompt = Instance.new("ProximityPrompt")
 		prompt.ActionText = actionText
 		prompt.ObjectText = part.Name
@@ -51,6 +60,10 @@ end
 local function setupTreadmills()
 	local cfg = Config.Treadmill
 	local function belt(part)
+		if not part:IsA("BasePart") then
+			warn("Tag 'Treadmill' must be on the belt part, not on " .. part:GetFullName())
+			return
+		end
 		-- An anchored part with velocity acts like a conveyor belt.
 		-- It pushes backwards, so players face the part's front (-Z) and run.
 		part.AssemblyLinearVelocity = -part.CFrame.LookVector * cfg.BeltSpeed

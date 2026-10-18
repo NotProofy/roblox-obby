@@ -1,0 +1,6 @@
+*.rbxlx
+*.rbxl
+*.rbxlx.lock
+sourcemap.json
+/rojo
+/rojo.exe

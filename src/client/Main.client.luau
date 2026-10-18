@@ -6,19 +6,27 @@ local TweenService = game:GetService("TweenService")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
+local Format = require(ReplicatedStorage.Shared.Format)
 local UI = require(script.Parent.UI)
 local Minigames = require(script.Parent.Minigames)
 
 local player = Players.LocalPlayer
 local gui = UI.new("ScreenGui", { Name = "RedLineHUD", ResetOnSpawn = false, IgnoreGuiInset = false, Parent = player:WaitForChild("PlayerGui") })
+local money = Format.money
 
-local function money(n)
-	local s = tostring(math.floor(n or 0))
-	repeat
-		local count
-		s, count = s:gsub("^(%d+)(%d%d%d)", "%1,%2")
-	until count == 0
-	return "$" .. s
+-- Shrink the whole HUD on small screens (phones) so it doesn't cover the controls
+local uiScale = UI.new("UIScale", { Parent = gui })
+local function rescale()
+	local camera = workspace.CurrentCamera
+	if camera then
+		local size = camera.ViewportSize
+		uiScale.Scale = math.clamp(math.min(size.X / 1100, size.Y / 700), 0.55, 1)
+	end
+end
+rescale()
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(rescale)
+if workspace.CurrentCamera then
+	workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(rescale)
 end
 
 ---------------------------------------------------------------------------
@@ -68,11 +76,16 @@ local function refresh()
 end
 player.AttributeChanged:Connect(refresh)
 refresh()
+-- Parts can stream in later, so color new red line parts too
+CollectionService:GetInstanceAddedSignal("RedLineVisual"):Connect(function()
+	colorRedLine((player:GetAttribute("Fitness") or 0) >= Config.GoalFitness)
+end)
 
 ---------------------------------------------------------------------------
--- Notifications: small toasts (bottom right) and big banners (center)
+-- Notifications: small toasts (right side) and big banners (center)
 ---------------------------------------------------------------------------
-local toasts = UI.new("Frame", { Parent = gui, BackgroundTransparency = 1, AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -12, 1, -12), Size = UDim2.fromOffset(280, 300) }, {
+-- Toasts sit above the bottom-right corner so they never cover the phone jump button
+local toasts = UI.new("Frame", { Parent = gui, BackgroundTransparency = 1, AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -12, 0.7, 0), Size = UDim2.fromOffset(280, 300) }, {
 	UI.new("UIListLayout", { VerticalAlignment = Enum.VerticalAlignment.Bottom, Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }),
 })
 local toastOrder = 0
@@ -148,6 +161,11 @@ local startButton = UI.button({ Parent = challengePanel, AnchorPoint = Vector2.n
 local function refreshChallenge()
 	local index = player:GetAttribute("NextChallenge") or 0
 	local busy = player:GetAttribute("InChallenge") ~= nil
+	if busy and confirm.Visible then
+		-- A challenge started while the red line question was open: answer "stay"
+		confirm.Visible = false
+		Remotes.LeaveAnswer:FireServer(false)
+	end
 	local challenge = Config.Challenges[index]
 	challengePanel.Visible = challenge ~= nil and not busy
 	if challenge then
@@ -178,7 +196,8 @@ local function carryChooser(params)
 	local amount = UI.text({ Parent = frame, Position = UDim2.fromOffset(80, 92), Size = UDim2.new(1, -160, 0, 44), Text = "" })
 	local minus = UI.button({ Parent = frame, Position = UDim2.fromOffset(20, 92), Size = UDim2.fromOffset(50, 44), Text = "-", BackgroundColor3 = UI.Colors.Blue })
 	local plus = UI.button({ Parent = frame, Position = UDim2.new(1, -70, 0, 92), Size = UDim2.fromOffset(50, 44), Text = "+", BackgroundColor3 = UI.Colors.Blue })
-	local go = UI.button({ Parent = frame, AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 152), Size = UDim2.fromOffset(200, 50), Text = "PICK UP & GO", BackgroundColor3 = UI.Colors.Green })
+	local go = UI.button({ Parent = frame, Position = UDim2.new(0.5, -110, 0, 152), Size = UDim2.fromOffset(200, 50), Text = "PICK UP & GO", BackgroundColor3 = UI.Colors.Green })
+	local cancel = UI.button({ Parent = frame, Position = UDim2.new(0.5, 100, 0, 152), Size = UDim2.fromOffset(100, 50), Text = "CANCEL", BackgroundColor3 = UI.Colors.Red })
 	local function show()
 		amount.Text = bags .. " bag" .. (if bags == 1 then "" else "s") .. " = " .. money(bags * Config.CashCarry.PerBag)
 	end
@@ -194,6 +213,10 @@ local function carryChooser(params)
 	go.Activated:Connect(function()
 		frame:Destroy()
 		Remotes.CarryChoice:FireServer(bags)
+	end)
+	cancel.Activated:Connect(function()
+		frame:Destroy()
+		Remotes.CarryChoice:FireServer(0) -- 0 bags = cancel, the challenge stays unlocked
 	end)
 	return frame
 end

@@ -10,17 +10,20 @@ local PlayerData = require(script.Parent.PlayerData)
 
 local Track = {}
 
-local state = {} -- [player] = { forward, backward, handler }
+local state = {} -- [player] = { forward, backward, handler, recent = { [checkpoint] = time } }
 local checkpointCount = 0
 
 local function getState(player)
 	if not state[player] then
-		state[player] = { forward = 0, backward = 0, handler = nil }
+		state[player] = { forward = 0, backward = 0, handler = nil, recent = {} }
 	end
 	return state[player]
 end
 
 local function defaultLap(player)
+	if player:GetAttribute("InChallenge") then
+		return -- e.g. walking around while choosing bags; no free laps during challenges
+	end
 	local lap = Config.TrackLap
 	if PlayerData.Spend(player, lap.Energy) then
 		PlayerData.Add(player, "Fitness", lap.Fitness)
@@ -88,15 +91,24 @@ function Track.GetStartCFrame()
 end
 
 local function hook(cp)
-	checkpointCount = math.max(checkpointCount, cp:GetAttribute("Order") or 0)
-	local recent = {}
+	local order = cp:GetAttribute("Order")
+	if not cp:IsA("BasePart") or type(order) ~= "number" then
+		warn("TrackCP '" .. cp:GetFullName() .. "' needs to be a part with a number attribute 'Order'")
+		return
+	end
+	checkpointCount = math.max(checkpointCount, order)
 	cp.Touched:Connect(function(hit)
 		local player = Players:GetPlayerFromCharacter(hit.Parent)
-		if not player or (recent[player] and os.clock() - recent[player] < 1) then
+		if not player or checkpointCount < 2 then
 			return
 		end
-		recent[player] = os.clock()
-		onCheckpoint(player, cp:GetAttribute("Order"))
+		-- Many body parts touch at once, so only count one touch per second
+		local s = getState(player)
+		if s.recent[cp] and os.clock() - s.recent[cp] < 1 then
+			return
+		end
+		s.recent[cp] = os.clock()
+		onCheckpoint(player, order)
 	end)
 end
 
