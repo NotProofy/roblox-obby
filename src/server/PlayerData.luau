@@ -15,6 +15,10 @@ local profiles = {} -- [player] = data table (this is what gets saved)
 local session = {} -- [player] = { LastTiredNotice = time } (never saved)
 local loadFailed = {} -- [player] = true if loading failed, so we never overwrite their save
 local pendingSaves = 0 -- how many saves are running right now (used when the server shuts down)
+local loadedEvent = Instance.new("BindableEvent")
+
+-- Fires with (player) once their data has loaded. Other systems use it to set things up.
+PlayerData.Loaded = loadedEvent.Event
 
 local function newRun()
 	return {
@@ -30,7 +34,14 @@ local function newRun()
 end
 
 local function newProfile()
-	return { Bank = 0, Wins = 0, BestDays = 0, Run = newRun() }
+	return {
+		Bank = 0,
+		Wins = 0,
+		BestDays = 0,
+		Run = newRun(),
+		Owned = {}, -- [shop item Id] = true
+		Equipped = { Shirts = "", Trails = "" }, -- shop item Id per category ("" = none)
+	}
 end
 
 local function withRetries(fn)
@@ -51,6 +62,14 @@ end
 -- Only keys the default has, with the same type, are copied. This means old saves
 -- get any new fields automatically and a broken value can't crash the game.
 local function merge(into, saved)
+	-- Owned starts empty, so copy its entries one by one
+	if type(saved.Owned) == "table" and type(into.Owned) == "table" then
+		for id, owned in saved.Owned do
+			if type(id) == "string" and owned == true then
+				into.Owned[id] = true
+			end
+		end
+	end
 	for key, default in into do
 		local value = saved[key]
 		if value ~= nil and type(value) == type(default) then
@@ -81,6 +100,16 @@ function PlayerData.Sync(player)
 	local ready = run.ChallengesDone < run.CheckIns and run.ChallengesDone < #Config.Challenges
 	player:SetAttribute("NextChallenge", if ready then run.ChallengesDone + 1 else 0)
 
+	-- Shop: attributes can't hold tables, so owned items are a comma list
+	local owned = {}
+	for id in p.Owned do
+		table.insert(owned, id)
+	end
+	table.sort(owned)
+	player:SetAttribute("Owned", table.concat(owned, ","))
+	player:SetAttribute("EquippedShirts", p.Equipped.Shirts)
+	player:SetAttribute("EquippedTrails", p.Equipped.Trails)
+
 	local stats = player:FindFirstChild("leaderstats")
 	if stats then
 		stats.Bank.Value = p.Bank
@@ -92,8 +121,20 @@ function PlayerData.Get(player)
 	return profiles[player]
 end
 
-function PlayerData.Notify(player, kind, title, body)
-	Remotes.Notify:FireClient(player, kind, title, body or "")
+-- soundName is optional: a key of Config.Sounds to play with the message
+function PlayerData.Notify(player, kind, title, body, soundName)
+	Remotes.Notify:FireClient(player, kind, title, body or "", soundName)
+end
+
+-- Spend Bank money (shop). Returns true if they had enough.
+function PlayerData.SpendBank(player, amount)
+	local p = profiles[player]
+	if not p or amount < 0 or p.Bank < amount then
+		return false
+	end
+	p.Bank -= amount
+	PlayerData.Sync(player)
+	return true
 end
 
 local function checkIns(player, run)
@@ -105,7 +146,7 @@ local function checkIns(player, run)
 		if challenge then
 			body ..= "\nChallenge unlocked: " .. challenge.Name
 		end
-		PlayerData.Notify(player, "big", "CHECK-IN: " .. math.floor(run.Fitness) .. "% FIT!", body)
+		PlayerData.Notify(player, "big", "CHECK-IN: " .. math.floor(run.Fitness) .. "% FIT!", body, "CheckIn")
 	end
 end
 
@@ -170,9 +211,9 @@ function PlayerData.EndRun(player, won)
 		if p.BestDays == 0 or run.Day < p.BestDays then
 			p.BestDays = run.Day
 		end
-		PlayerData.Notify(player, "big", "YOU WON " .. Format.money(run.Prize) .. "!", "Finished in " .. run.Day .. " days. A new run begins!")
+		PlayerData.Notify(player, "big", "YOU WON " .. Format.money(run.Prize) .. "!", "Finished in " .. run.Day .. " days. A new run begins!", "ChallengeWin")
 	else
-		PlayerData.Notify(player, "big", "YOU CROSSED THE LINE", "The " .. Format.money(run.Prize) .. " prize pool is gone. Try again!")
+		PlayerData.Notify(player, "big", "YOU CROSSED THE LINE", "The " .. Format.money(run.Prize) .. " prize pool is gone. Try again!", "ChallengeFail")
 	end
 	p.Run = newRun()
 	PlayerData.Sync(player)
@@ -219,7 +260,10 @@ local function onPlayerAdded(player)
 	end
 	session[player] = {}
 	profiles[player] = profile
+	-- The leaderboard only trusts Bank values from profiles that loaded properly
+	player:SetAttribute("DataLoaded", ok)
 	PlayerData.Sync(player)
+	loadedEvent:Fire(player)
 end
 
 function PlayerData.Start()

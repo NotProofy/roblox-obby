@@ -1,5 +1,5 @@
--- The five micro-challenges that add money to the prize pool.
--- Timing games (push-ups, hang, pull-up) run on the client; the server checks the
+-- The six micro-challenges that add money to the prize pool.
+-- Timing games (push-ups, hang, pull-up, plank) run on the client; the server checks the
 -- result is possible for the time that passed. Track challenges run on the server.
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
@@ -57,7 +57,8 @@ local function finish(player, reward, title, body, consume)
 	else
 		PlayerData.Sync(player)
 	end
-	PlayerData.Notify(player, "big", title, body .. "\nPrize pool: " .. Format.money(profile.Run.Prize))
+	local sound = if reward > 0 then "ChallengeWin" elseif consume ~= false then "ChallengeFail" else nil
+	PlayerData.Notify(player, "big", title, body .. "\nPrize pool: " .. Format.money(profile.Run.Prize), sound)
 end
 
 local function sendToSpawn(player)
@@ -169,6 +170,22 @@ starters.PullUp = function(player, a)
 	return true
 end
 
+starters.Plank = function(player, a)
+	if not freezeAt(player, a, spot("PushUpSpot"), Vector3.new(0, 3, 0)) then
+		return false
+	end
+	local cfg = Config.Plank
+	Remotes.ChallengeBegin:FireClient(player, "Plank", {
+		Strength = player:GetAttribute("Strength"),
+		PerSecond = cfg.PerSecond,
+		MaxSeconds = cfg.MaxSeconds,
+		FormDrainPerSec = cfg.FormDrainPerSec,
+		FormRefillPerSec = cfg.FormRefillPerSec,
+	})
+	timeoutClientGame(player, a)
+	return true
+end
+
 local function goToTrackStart(player)
 	local root = getRoot(player)
 	if not root then
@@ -260,6 +277,9 @@ local function onResult(player, value)
 	if not a then
 		return
 	end
+	if type(value) == "number" and (value ~= value or value == math.huge) then
+		value = 0 -- NaN or infinity sent by a cheater; treat it as zero
+	end
 	local elapsed = os.clock() - a.startedAt
 	if a.id == "PushUps" and type(value) == "number" then
 		local cfg = Config.PushUps
@@ -269,6 +289,10 @@ local function onResult(player, value)
 		local cfg = Config.Hang
 		local seconds = math.clamp(math.floor(value), 0, math.min(cfg.MaxSeconds, math.floor(elapsed + 1)))
 		finish(player, seconds * cfg.PerSecond, "HUNG FOR " .. seconds .. "s!", "+" .. Format.money(seconds * cfg.PerSecond) .. " added to the prize pool")
+	elseif a.id == "Plank" and type(value) == "number" then
+		local cfg = Config.Plank
+		local seconds = math.clamp(math.floor(value), 0, math.min(cfg.MaxSeconds, math.floor(elapsed + 1)))
+		finish(player, seconds * cfg.PerSecond, "PLANK: " .. seconds .. "s!", "+" .. Format.money(seconds * cfg.PerSecond) .. " added to the prize pool")
 	elseif a.id == "PullUp" then
 		if value == true and elapsed > 1 then
 			finish(player, Config.PullUp.Reward, "PULL-UP!", "+" .. Format.money(Config.PullUp.Reward) .. " added to the prize pool")

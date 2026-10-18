@@ -1,4 +1,4 @@
--- Timing minigames for Push-Ups, Crane Hang and Pull-Up.
+-- Timing minigames for Push-Ups, Crane Hang, Pull-Up and Plank Hold.
 -- Each one calls done(result) at most once when it ends. If the server ends the
 -- challenge first (it destroys the "Minigame" frame), the game stops and sends nothing.
 local RunService = game:GetService("RunService")
@@ -63,6 +63,14 @@ local function zoneAndMarker(track)
 			state.pos, state.dir = 0, 1
 		end
 		marker.Position = UDim2.fromScale(state.pos, 0)
+	end
+	function state.setPos(pos)
+		state.pos = math.clamp(pos, 0, 1)
+		marker.Position = UDim2.fromScale(state.pos, 0)
+	end
+	function state.moveZone(start)
+		state.zoneStart = math.clamp(start, 0, 1 - state.zoneWidth)
+		zone.Position = UDim2.fromScale(state.zoneStart, 0)
 	end
 	function state.inZone()
 		return state.pos >= state.zoneStart and state.pos <= state.zoneStart + state.zoneWidth
@@ -197,6 +205,88 @@ function Minigames.PullUp(gui, params, done)
 		heartbeat:Disconnect()
 		stopInput()
 	end)
+end
+
+function Minigames.Plank(gui, params, done)
+	local strength = params.Strength or 0
+	local perSecond = params.PerSecond or 1500
+	local maxSeconds = params.MaxSeconds or 120
+	local drain = params.FormDrainPerSec or 35
+	local refill = params.FormRefillPerSec or 10
+	local frame, track, counter, tap = makeFrame(gui, "PLANK HOLD", "HOLD to lift, let go to drop. Keep the marker in the GREEN!")
+	tap.Text = "HOLD / SPACE"
+	local zm = zoneAndMarker(track)
+	zm.setZone(math.min(0.35, 0.18 + strength * 0.0015))
+	zm.moveZone(0.5 - zm.zoneWidth / 2)
+	zm.setPos(0.5)
+	-- The "form" meter sits under the bar
+	local formBack = UI.panel({ Parent = frame, Position = UDim2.new(0, 20, 0, 108), Size = UDim2.new(1, -40, 0, 8), BackgroundColor3 = Color3.fromRGB(50, 52, 64), BackgroundTransparency = 0 })
+	local formFill = UI.new("Frame", { Parent = formBack, BackgroundColor3 = UI.Colors.Green, BorderSizePixel = 0, Size = UDim2.fromScale(1, 1) })
+
+	local holding, velocity, form, elapsed, finished = false, 0, 100, 0, false
+	local connections = {
+		tap.MouseButton1Down:Connect(function()
+			holding = true
+		end),
+		tap.MouseButton1Up:Connect(function()
+			holding = false
+		end),
+		UserInputService.InputBegan:Connect(function(input)
+			if input.KeyCode == Enum.KeyCode.Space and not UserInputService:GetFocusedTextBox() then
+				holding = true
+			end
+		end),
+		UserInputService.InputEnded:Connect(function(input)
+			-- Also let go if the finger/mouse is released somewhere off the button
+			local inputType = input.UserInputType
+			if input.KeyCode == Enum.KeyCode.Space or inputType == Enum.UserInputType.MouseButton1 or inputType == Enum.UserInputType.Touch then
+				holding = false
+			end
+		end),
+	}
+	local heartbeat
+	local function stop()
+		finished = true
+		for _, c in connections do
+			c:Disconnect()
+		end
+		if heartbeat then
+			heartbeat:Disconnect()
+		end
+	end
+	heartbeat = RunService.Heartbeat:Connect(function(dt)
+		if finished then
+			return
+		end
+		elapsed += dt
+		-- Holding pushes the marker up, gravity pulls it down, and a wobble makes it harder over time
+		local wobble = math.sin(elapsed * 2.3) * (0.4 + elapsed * 0.01)
+		velocity += ((if holding then 1.6 else -1.6) + wobble) * dt
+		velocity *= 0.97
+		zm.setPos(zm.pos + velocity * dt)
+		if zm.pos <= 0 or zm.pos >= 1 then
+			velocity = 0
+		end
+		-- The green zone slowly drifts
+		zm.moveZone(0.5 - zm.zoneWidth / 2 + math.sin(elapsed * 0.7) * 0.25)
+
+		form = math.clamp(form + (if zm.inZone() then refill else -drain) * dt, 0, 100)
+		formFill.Size = UDim2.fromScale(form / 100, 1)
+		formFill.BackgroundColor3 = if form < 30 then UI.Colors.Red else UI.Colors.Green
+		local seconds = math.floor(elapsed)
+		counter.Text = seconds .. "s  ·  " .. Format.money(seconds * perSecond)
+		if form <= 0 or elapsed >= maxSeconds then
+			stop()
+			counter.Text = if form <= 0 then "YOU DROPPED at " .. seconds .. "s" else "MAX TIME! " .. seconds .. "s"
+			task.delay(1, function()
+				if frame.Parent then
+					frame:Destroy()
+					done(seconds)
+				end
+			end)
+		end
+	end)
+	onClosed(frame, stop)
 end
 
 return Minigames

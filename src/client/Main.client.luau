@@ -1,4 +1,4 @@
--- The HUD, popups, red-line warning and challenge screens.
+-- The HUD, popups, red-line warning, shop button and challenge screens.
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -9,6 +9,8 @@ local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local Format = require(ReplicatedStorage.Shared.Format)
 local UI = require(script.Parent.UI)
 local Minigames = require(script.Parent.Minigames)
+local Sounds = require(script.Parent.Sounds)
+local ShopUI = require(script.Parent.ShopUI)
 
 local player = Players.LocalPlayer
 local gui = UI.new("ScreenGui", { Name = "RedLineHUD", ResetOnSpawn = false, IgnoreGuiInset = false, Parent = player:WaitForChild("PlayerGui") })
@@ -54,6 +56,7 @@ local function colorRedLine(reached)
 end
 
 local lastPrize = nil
+local lastBank = nil
 local function refresh()
 	local fitness = player:GetAttribute("Fitness") or 0
 	dayLabel.Text = "DAY " .. (player:GetAttribute("Day") or 1)
@@ -65,13 +68,19 @@ local function refresh()
 	local prize = player:GetAttribute("Prize") or 0
 	prizeLabel.Text = money(prize)
 	bankLabel.Text = "Bank: " .. money(player:GetAttribute("Bank"))
+	local bank = player:GetAttribute("Bank") or 0
 	if lastPrize and prize > lastPrize then
 		prizeLabel.TextColor3 = UI.Colors.Green
 		task.delay(1.5, function()
 			prizeLabel.TextColor3 = UI.Colors.Gold
 		end)
 	end
-	lastPrize = prize
+	if (lastPrize and prize > lastPrize) or (lastBank and bank > lastBank) then
+		Sounds.play("Coin")
+	end
+	-- Stay nil until the server has sent real values, so joining doesn't count as "money gained"
+	lastPrize = player:GetAttribute("Prize")
+	lastBank = player:GetAttribute("Bank")
 	colorRedLine(fitness >= Config.GoalFitness)
 end
 player.AttributeChanged:Connect(refresh)
@@ -120,7 +129,8 @@ local function bigBanner(title, body)
 	end)
 end
 
-Remotes.Notify.OnClientEvent:Connect(function(kind, title, body)
+Remotes.Notify.OnClientEvent:Connect(function(kind, title, body, soundName)
+	Sounds.play(soundName)
 	if kind == "big" then
 		bigBanner(title, body)
 	else
@@ -140,6 +150,7 @@ local leaveButton = UI.button({ Parent = confirm, Position = UDim2.new(0.5, 8, 1
 Remotes.ConfirmLeave.OnClientEvent:Connect(function(prize)
 	confirmBody.Text = "If you leave now you lose the " .. money(prize) .. " prize pool and start over."
 	confirm.Visible = true
+	Sounds.play("RedLineWarning")
 end)
 stayButton.Activated:Connect(function()
 	confirm.Visible = false
@@ -148,6 +159,15 @@ end)
 leaveButton.Activated:Connect(function()
 	confirm.Visible = false
 	Remotes.LeaveAnswer:FireServer(true)
+end)
+
+---------------------------------------------------------------------------
+-- Shop button (under the stats panel) and shop window
+---------------------------------------------------------------------------
+local toggleShop = ShopUI.create(gui)
+local shopButton = UI.button({ Parent = gui, Position = UDim2.new(0, 12, 0.55, 108), Size = UDim2.fromOffset(130, 44), Text = "SHOP", BackgroundColor3 = UI.Colors.Gold, TextColor3 = Color3.fromRGB(30, 25, 5) })
+shopButton.Activated:Connect(function()
+	toggleShop()
 end)
 
 ---------------------------------------------------------------------------
@@ -161,6 +181,9 @@ local startButton = UI.button({ Parent = challengePanel, AnchorPoint = Vector2.n
 local function refreshChallenge()
 	local index = player:GetAttribute("NextChallenge") or 0
 	local busy = player:GetAttribute("InChallenge") ~= nil
+	if busy then
+		toggleShop(false) -- no shopping in the middle of a challenge
+	end
 	if busy and confirm.Visible then
 		-- A challenge started while the red line question was open: answer "stay"
 		confirm.Visible = false
@@ -249,7 +272,7 @@ Remotes.ChallengeBegin.OnClientEvent:Connect(function(id, params)
 		end
 		return
 	end
-	if id == "PushUps" or id == "Hang" or id == "PullUp" then
+	if id == "PushUps" or id == "Hang" or id == "PullUp" or id == "Plank" then
 		Minigames[id](gui, params, function(result)
 			Remotes.ChallengeResult:FireServer(result)
 		end)

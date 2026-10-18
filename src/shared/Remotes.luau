@@ -3,13 +3,15 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local NAMES = {
-	"Notify", -- server -> client: (kind, title, body)
+	"Notify", -- server -> client: (kind, title, body, soundName?)
 	"ConfirmLeave", -- server -> client: (prizeAmount)
 	"LeaveAnswer", -- client -> server: (wantsToLeave: boolean)
 	"StartChallenge", -- client -> server
 	"ChallengeBegin", -- server -> client: (challengeId, params)
 	"ChallengeResult", -- client -> server: (value)
-	"CarryChoice", -- client -> server: (bags: number)
+	"CarryChoice", -- client -> server: (bags: number, 0 = cancel)
+	"ShopBuy", -- client -> server: (itemId)
+	"ShopEquip", -- client -> server: (category "Shirts"/"Trails", itemId or "" to take off)
 }
 
 local folder
